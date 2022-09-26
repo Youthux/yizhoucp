@@ -7,8 +7,8 @@ def main():
     print("start......")
 
     # token不定时获取
-    token = '1560976019693678_6253319_1690125190_2064a5c76c7381aaf32e59519060acbe'
-    # token = input("请输入token:")
+    # token = '1560976019693678_6253319_1690125190_2064a5c76c7381aaf32e59519060acbe'
+    token = input("请输入token:")
     # 每echo轮控制台输出一次进度
     echo = 100
     # 每个excel存放女嘉宾信息数量
