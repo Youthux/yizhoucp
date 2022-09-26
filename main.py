@@ -1,14 +1,14 @@
+import threading
 import requests
-import json
+import pymysql
 import xlwt
-
 
 def main():
     print("start......")
 
     # token不定时获取
-    # token = '1560976019693678_6253319_1686969719_f8645ef6e2873c9408af18091d576ae8'
-    token = input("请输入token:")
+    token = '1560976019693678_6253319_1690125190_2064a5c76c7381aaf32e59519060acbe'
+    # token = input("请输入token:")
     # 每echo轮控制台输出一次进度
     echo = 100
     # 每个excel存放女嘉宾信息数量
@@ -17,9 +17,69 @@ def main():
     num = 0
     # 女嘉宾信息列表
     girl_list = []
+    # 起始用户id
+    fuid_begin = 0
+    # 结束用户id
+    fuid_end = 6543620  # 一周CP目前用户数量达到6543620
+    # 抛异常的用户ID列表
+    e_fuid = []
 
-    # 一周CP目前用户数量达到6515600
-    for fuid in reversed(range(0, 6515600)):
+    thread_list = []
+    for i in range(99):
+        fuid_end = fuid_begin + 66100
+        thread_list.append(threading.Thread(target=get_girls_to_db, args=(token, rows, fuid_begin, fuid_end, e_fuid)))
+        fuid_begin = fuid_end
+    for thread in thread_list:
+        thread.start()
+    for thread in thread_list:
+        thread.join()
+
+    print("efuid:", e_fuid)
+    file = open('efuid.txt', 'w', encoding='utf-8')
+    for i in range(len(e_fuid)):
+        file.write(str(e_fuid[i]) + '\n')
+    file.close()
+    print("落表完毕")
+
+
+# 爬取女嘉宾信息并记录数据库
+def get_girls_to_db(token, rows, fuid_begin, fuid_end, e_fuid):
+    girl_list = []
+    for fuid in range(fuid_begin, fuid_end):
+        try:
+            # 获取用户信息
+            resp = get_user_info(token, fuid)
+
+            if resp["data"] and resp["data"]["sex_des"] == "女":  # resp["data"]["address"] == "广东 深圳"
+                # ID|昵称|年龄|星座|地址|照片|身高|年收入|职业|恋爱次数|家乡|学校|微信
+                girl_info = []
+                girl_info.append(fuid)
+                girl_info.append(resp["data"]["nickname"])
+                girl_info.append(resp["data"]["age"])
+                girl_info.append(resp["data"]["constellation"])
+                girl_info.append(resp["data"]["address"])
+                girl_info.append(resp["data"]["privacy"]["life_photo"]["data"])
+                girl_info.append(resp["data"]["privacy"]["privacy_info"]["data"][0]["data"])
+                girl_info.append(resp["data"]["privacy"]["privacy_info"]["data"][1]["data"])
+                girl_info.append(resp["data"]["privacy"]["privacy_info"]["data"][2]["data"])
+                girl_info.append(resp["data"]["privacy"]["privacy_info"]["data"][3]["data"])
+                girl_info.append(resp["data"]["basic_info_list"]["des_info_map"]["hometown"]["info"])
+                girl_info.append(resp["data"]["basic_info_list"]["des_info_map"]["school"]["info"])
+                girl_info.append(resp["data"]["unlock_wechat_data"]["wechat"])
+
+                girl_list.append(girl_info)
+                if len(girl_list) == rows:
+                    write_db(girl_list)
+                    girl_list = []
+        except Exception as e:
+            print("fuid=" + str(fuid) + ",Exception:", e)
+            e_fuid.append(fuid)
+    if girl_list:
+        write_db(girl_list)
+
+# 爬取女嘉宾信息并记录excel文档
+def get_girls_to_excel(token, echo, rows, num, fuid_begin, fuid_end, girl_list):
+    for fuid in reversed(range(fuid_begin, fuid_end)):
         try:
             if fuid % echo == 0:
                 print("====step:" + str(fuid) + "=====")
@@ -45,9 +105,30 @@ def main():
             print("fuid=" + str(fuid) + ",Exception:", e)
 
 
+def write_db(param_list):
+    # 数据库连接
+    conn = pymysql.connect(host='localhost',
+                           user='root',
+                           password='root',
+                           db='yizhoucp',
+                           charset='utf8')
+    # 批量插入数据
+    with conn.cursor() as cursor:
+        try:
+            sql = "insert into custinfo values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            cursor.executemany(sql, param_list)
+            conn.commit()
+            print(threading.current_thread().name + ":落表成功,"+str(param_list[0][0])+"->"+str(param_list[-1][0]))
+        except Exception as e:
+            print(threading.current_thread().name + ":落表失败," + str(param_list[0][0]) + "->" + str(param_list[-1][0]) + ",Exception:", e)
+            conn.rollback()
+    conn.close()
+
+
 def get_user_info(token, fuid):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.75 Mobile Safari/537.36',
+        'Connection': 'close',
         'Token': token
     }
     get_user_param = {
@@ -55,11 +136,9 @@ def get_user_info(token, fuid):
         'from': 'recommend'
     }
     get_user_url = "https://w.yizhoucp.cn/api/apps/wcp/user/get-user-profile-start"
-
+    requests.adapters.DEFAULT_RETRIES = 5
     response = requests.get(url=get_user_url, params=get_user_param, headers=headers)
-    re = eval("u" + "\'" + response.text + "\'").replace('\n', '').replace('\r\n', '').replace('\/', '/')  # unicode转中文
-    result = json.loads(re, strict=False)
-    return result
+    return response.json()
 
 
 def heart_user(token, fuid):
@@ -74,9 +153,7 @@ def heart_user(token, fuid):
     }
     heart_user_url = "https://w.yizhoucp.cn/api/apps/wcp/like/heartbeat-user"
     response = requests.post(url=heart_user_url, headers=headers, files=data)
-    re = eval("u" + "\'" + response.text + "\'").replace('\n', '').replace('\r\n', '').replace('\/', '/')
-    result = json.loads(re, strict=False)
-    return result
+    return response.json()
 
 
 def write_excel(data_list, num):
@@ -96,6 +173,7 @@ def write_excel(data_list, num):
     worksheet.write(0, 9, label='恋爱次数')
     worksheet.write(0, 10, label='家乡')
     worksheet.write(0, 11, label='学校')
+    worksheet.write(0, 12, label='微信')
     for row in range(0, len(data_list)):
         worksheet.write(row + 1, 0, data_list[row]["data"]["fuid"])
         worksheet.write(row + 1, 1, data_list[row]["data"]["nickname"])
@@ -109,6 +187,7 @@ def write_excel(data_list, num):
         worksheet.write(row + 1, 9, data_list[row]["data"]["privacy"]["privacy_info"]["data"][3]["data"])
         worksheet.write(row + 1, 10, data_list[row]["data"]["basic_info_list"]["des_info_map"]["hometown"]["info"])
         worksheet.write(row + 1, 11, data_list[row]["data"]["basic_info_list"]["des_info_map"]["school"]["info"])
+        worksheet.write(row + 1, 12, data_list[row]["data"]["unlock_wechat_data"]["wechat"])
     # 保存并关闭
     workbook.save('excel\FemaleGuestInfo' + str(num) + '.xls')
     print("落表成功，序号:" + str(num))
