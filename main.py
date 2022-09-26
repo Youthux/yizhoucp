@@ -3,6 +3,7 @@ import requests
 import pymysql
 import xlwt
 
+
 def main():
     print("start......")
 
@@ -76,6 +77,7 @@ def get_girls_to_db(token, rows, fuid_begin, fuid_end, e_fuid):
             e_fuid.append(fuid)
     if girl_list:
         write_db(girl_list)
+
 
 # 爬取女嘉宾信息并记录excel文档
 def get_girls_to_excel(token, echo, rows, num, fuid_begin, fuid_end, girl_list):
